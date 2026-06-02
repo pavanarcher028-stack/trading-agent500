@@ -2,8 +2,8 @@ import ccxt
 import time
 import os
 
-API_KEY = os.environ.get("82c6d448e782fc9bd4170f92f7fbb9783f7425a22893c444")
-API_SECRET = os.environ.get("********")
+API_KEY = os.environ.get("COINDCX_API_KEY")
+API_SECRET = os.environ.get("COINDCX_SECRET")
 
 exchange = ccxt.coindcx({
     'apiKey': API_KEY,
