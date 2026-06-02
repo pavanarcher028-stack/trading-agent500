@@ -1,6 +1,6 @@
 import time
 import os
-from anthropic import Anthropic
+import anthropic
 from data import get_top5_ohlcv, get_market_summary
 from backtest import run_backtest, is_strategy_good
 from trader import execute_strategy
