@@ -1,14 +1,14 @@
 import ccxt
 import pandas as pd
 
-exchange = ccxt.coindcx()
+exchange = ccxt.binance()
 
 COINS = [
-    'BTC/INR',
-    'ETH/INR',
-    'XRP/INR',
-    'SOL/INR',
-    'DOGE/INR'
+    'BTC/USDT',
+    'ETH/USDT',
+    'XRP/USDT',
+    'SOL/USDT',
+    'DOGE/USDT'
 ]
 
 def get_top5_ohlcv():
@@ -30,5 +30,5 @@ def get_market_summary(all_data):
     for coin, df in all_data.items():
         last_close = round(df['close'].iloc[-1], 2)
         change = round(((df['close'].iloc[-1] - df['close'].iloc[-24]) / df['close'].iloc[-24]) * 100, 2)
-        summary.append(f"{coin}: price={last_close} INR, 24h change={change}%")
+        summary.append(f"{coin}: price={last_close} USDT, 24h change={change}%")
     return "\n".join(summary)
