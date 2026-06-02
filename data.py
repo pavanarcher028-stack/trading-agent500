@@ -1,64 +1,75 @@
 import sys
-sys.stdout.reconfigure(line_buffering=True)
-
-import ccxt
+import requests
 import pandas as pd
 
-print("[DATA] Initializing Binance connection...")
+sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1)
 
-try:
-    exchange = ccxt.binance({
-        'enableRateLimit': True,
-        'options': {
-            'defaultType': 'spot'
+print("[DATA] Starting data module...", flush=True)
+
+COINS = ['BTC', 'ETH', 'XRP', 'DOGE', 'MATIC']
+
+COINGECKO_IDS = {
+    'BTC':   'bitcoin',
+    'ETH':   'ethereum',
+    'XRP':   'ripple',
+    'DOGE':  'dogecoin',
+    'MATIC': 'matic-network'
+}
+
+def get_ohlcv_for_coin(coin_id):
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
+        params = {
+            'vs_currency': 'usd',
+            'days': '14'
         }
-    })
-    print("[DATA] Binance connected successfully")
-except Exception as e:
-    print(f"[DATA] Binance connection failed: {e}")
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
 
-COINS = [
-    'BTC/USDT',
-    'ETH/USDT',
-    'XRP/USDT',
-    'DOGE/USDT',
-    'MATIC/USDT'
-]
+        if not data or isinstance(data, dict):
+            print(f"[DATA] Bad response for {coin_id}: {data}", flush=True)
+            return None
+
+        df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        df['volume'] = 1000000
+        print(f"[DATA] OK {coin_id} — {len(df)} candles — last close: {df['close'].iloc[-1]}", flush=True)
+        return df
+
+    except Exception as e:
+        print(f"[DATA] Failed {coin_id}: {e}", flush=True)
+        return None
 
 def get_top5_ohlcv():
     all_data = {}
-    for coin in COINS:
-        try:
-            print(f"[DATA] Fetching {coin}...")
-            ohlcv = exchange.fetch_ohlcv(coin, timeframe='1h', limit=200)
-            if not ohlcv:
-                print(f"[DATA] Empty response for {coin}")
-                continue
-            df = pd.DataFrame(
-                ohlcv,
-                columns=['timestamp','open','high','low','close','volume']
-            )
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
-            all_data[coin] = df
-            print(f"[DATA] OK {coin} — {len(df)} candles — last close: {df['close'].iloc[-1]}")
-        except Exception as e:
-            print(f"[DATA] FAILED {coin}: {e}")
-    print(f"[DATA] Done — fetched {len(all_data)}/5 coins")
+    for symbol in COINS:
+        coin_id = COINGECKO_IDS[symbol]
+        print(f"[DATA] Fetching {symbol}...", flush=True)
+        df = get_ohlcv_for_coin(coin_id)
+        if df is not None:
+            all_data[symbol] = df
+        # wait between requests to respect rate limit
+        import time
+        time.sleep(2)
+
+    print(f"[DATA] Done — fetched {len(all_data)}/5 coins", flush=True)
     return all_data
 
 def get_market_summary(all_data):
     summary = []
     for coin, df in all_data.items():
         last_close = round(df['close'].iloc[-1], 4)
-        change = round(
-            ((df['close'].iloc[-1] - df['close'].iloc[-24])
-            / df['close'].iloc[-24]) * 100, 2
-        )
-        vol = round(df['volume'].iloc[-1], 2)
+        if len(df) >= 2:
+            change = round(
+                ((df['close'].iloc[-1] - df['close'].iloc[-2])
+                / df['close'].iloc[-2]) * 100, 2
+            )
+        else:
+            change = 0
         summary.append(
-            f"{coin}: price={last_close}, 24h_change={change}%, volume={vol}"
+            f"{coin}: price={last_close} USD, change={change}%"
         )
     result = "\n".join(summary)
-    print(f"[DATA] Market summary:\n{result}")
+    print(f"[DATA] Market summary:\n{result}", flush=True)
     return result
