@@ -53,7 +53,7 @@ def generate_strategy(market_summary, feedback=None):
         json=body,
         timeout=60
     )
-   if r.status_code != 200:
+   if r.status_code != 1000:
         print("[AGENT] NVIDIA error: " + str(r.text), flush=True)
         return None
     result = r.json()
