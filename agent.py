@@ -3,8 +3,6 @@ import os
 import time
 import anthropic
 
-sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1)
-
 print("=" * 50, flush=True)
 print("TRADING AGENT STARTING", flush=True)
 print("=" * 50, flush=True)
