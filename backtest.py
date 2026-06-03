@@ -19,7 +19,13 @@ def run_backtest(strategy_code, all_data):
             max_drawdown = 0
             for i in range(1, len(signals)):
                 price = float(df["close"].iloc[i])
-                sig = int(signals.iloc[i])
+                raw = signals.iloc[i]
+                if raw > 0:
+                    sig = 1
+                elif raw < 0:
+                    sig = -1
+                else:
+                    sig = 0
                 if sig == 1 and position == 0:
                     position = capital / price
                     buy_price = price
