@@ -26,6 +26,7 @@ def run_backtest(strategy_code, all_data):
             exec(strategy_code, local_env)
             get_signals = local_env["get_signals"]
             raw = get_signals(df.copy())
+            print("Signal type: " + str(type(raw)) + " sample: " + str(raw.iloc[0] if hasattr(raw, 'iloc') else raw), flush=True)
             signals = pd.to_numeric(pd.Series(raw).squeeze(), errors="coerce").fillna(0)
             capital = 10000
             position = 0
