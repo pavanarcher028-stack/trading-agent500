@@ -15,14 +15,21 @@ def generate_strategy(market_summary, feedback=None):
     fb = ""
     if feedback:
         fb = "Previous failed: " + feedback + " Try different approach."
-    prompt = "You are a trading strategy developer.\n"
+  prompt = "You are an expert quant trader building strict risk-managed strategies.\n"
     prompt += "Market data:\n" + market_summary + "\n"
     prompt += fb + "\n"
     prompt += "Write a Python function get_signals(df).\n"
     prompt += "df has columns: open, high, low, close, volume.\n"
     prompt += "Return pandas Series: 1=buy, -1=sell, 0=hold.\n"
-    prompt += "Use only pandas and numpy.\n"
-    prompt += "Return ONLY the function code, no markdown.\n"
+    prompt += "Use only pandas and numpy. No external libraries.\n"
+    prompt += "STRICT RULES your strategy MUST follow:\n"
+    prompt += "1. Only buy when RSI is below 35 AND price is above 200 EMA (trend filter).\n"
+    prompt += "2. Sell immediately if price drops 3 percent below entry (stop loss).\n"
+    prompt += "3. Sell when RSI goes above 65 (take profit).\n"
+    prompt += "4. Never hold more than 20 candles (time stop).\n"
+    prompt += "5. Only generate a buy signal after at least 3 consecutive green candles confirm trend.\n"
+    prompt += "These rules are mandatory to keep drawdown below 15 percent.\n"
+    prompt += "Return ONLY the raw function code, no explanation, no markdown.\n" 
     print("[AGENT] Calling NVIDIA API...", flush=True)
     headers = {
         "Authorization": "Bearer " + NVIDIA_API_KEY,
