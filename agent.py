@@ -14,20 +14,47 @@ print("TRADING AGENT STARTED", flush=True)
 print("==================================================", flush=True)
 
 def generate_strategy(market_summary, previous_feedback=None):
-    feedback_text = ""
     if previous_feedback:
         feedback_text = "Previous strategy failed: " + previous_feedback + " Make a different approach."
+    else:
+        feedback_text = ""
 
-    prompt = """You are an expert algorithmic trading strategy developer.
+    prompt = (
+        "You are an expert algorithmic trading strategy developer.\n\n"
+        "Current market data:\n"
+        + market_summary + "\n"
+        + feedback_text + "\n\n"
+        "Write a Python function called get_signals(df) that:\n"
+        "- Takes a pandas DataFrame with columns: open, high, low, close, volume\n"
+        "- Returns a pandas Series of signals: 1 = buy, -1 = sell, 0 = hold\n"
+        "- Uses technical indicators like EMA, RSI, Bollinger Bands\n"
+        "- Is conservative, only signals when very confident\n"
+        "- Uses only pandas and numpy\n"
+        "- Returns ONLY the raw Python function, no explanation, no markdown\n\n"
+        "Example:\n"
+        "def get_signals(df):\n"
+        "    import pandas as pd\n"
+        "    import numpy as np\n"
+        "    signals = pd.Series(0, index=df.index)\n"
+        "    return signals\n"
+    )
 
-Current market data:
-""" + market_summary + """
-""" + feedback_text + """
+    print("[AGENT] Calling NVIDIA API...", flush=True)
 
-Write a Python function called get_signals(df) that:
-- Takes a pandas DataFrame with columns: open, high, low, close, volume
-- Returns a pandas Series of signals: 1 = buy, -1 = sell, 0 = hold
-- Uses technical indicators like EMA, RSI, Bollinger Bands
-- Is conservative — only signals when very confident
-- Use only pandas and numpy
-- Return ONLY the raw Python function, no exp
+    headers = {
+        "Authorization": "Bearer " + NVIDIA_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    body = {
+        "model": "meta/llama-3.3-70b-instruct",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 1000,
+        "temperature": 0.7
+    }
+
+    response = requests.post(
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        headers=h
