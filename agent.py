@@ -51,8 +51,11 @@ def generate_strategy(market_summary, feedback=None):
         "https://integrate.api.nvidia.com/v1/chat/completions",
         headers=headers,
         json=body,
-        timeout=30
+        timeout=60
     )
+   if r.status_code != 200:
+        print("[AGENT] NVIDIA error: " + str(r.text), flush=True)
+        return None
     result = r.json()
     code = result["choices"][0]["message"]["content"]
     code = code.replace("```python", "").replace("```", "").strip()
@@ -91,7 +94,10 @@ def run_agent():
                 while not good_coins and attempts < 5:
                     attempts += 1
                     print("[AGENT] Attempt " + str(attempts), flush=True)
-                    strategy_code = generate_strategy(market_summary, feedback)
+                 strategy_code = generate_strategy(market_summary, feedback)
+                    if strategy_code is None:
+                        print("[AGENT] Strategy generation failed, retrying...", flush=True)
+                        continue
                     results = run_backtest(strategy_code, all_data)
                     good_coins = is_strategy_good(results)
                     if not good_coins:
