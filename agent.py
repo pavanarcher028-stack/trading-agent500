@@ -81,9 +81,12 @@ def call_nvidia(prompt):
             if r.status_code == 200:
                 full = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 code = clean_code(full)
-                if code:
+               if code:
                     print("[AGENT] Strategy ready via Gemini", flush=True)
                     return code
+                else:
+                    print("[AGENT] Gemini returned no valid function", flush=True)
+                    print("[AGENT] Raw: " + full[:200], flush=True)
         except Exception as e:
             print("[AGENT] Gemini failed: " + str(e), flush=True)
     if nvidia_key:
