@@ -12,6 +12,7 @@ from trader import execute_strategy
 from monitor import needs_regeneration, bump_strategy_version, get_performance_summary
 
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 print("TRADING AGENT STARTED", flush=True)
 
 active_strategy = None
@@ -28,8 +29,9 @@ def build_prompt(market_summary, coins):
     p += "Write a Python function get_signals(df).\n"
     p += "df has columns: open, high, low, close, volume.\n"
     p += "Return pandas Series: 1=buy, -1=sell, 0=hold.\n"
-    p += "The function MUST start with: import pandas as pd\n"
-    p += "The function MUST start with: import numpy as np\n"
+    p += "The function MUST start with these two lines:\n"
+    p += "import pandas as pd\n"
+    p += "import numpy as np\n"
     p += "Use ONE of these proven quant math approaches:\n"
     p += "1. Z-Score mean reversion: zscore = (price - rolling_mean) / rolling_std, buy when zscore < -1.5, sell when zscore > 1.5\n"
     p += "2. Volatility breakout: ATR-based entry when price breaks above upper band with volume confirmation\n"
@@ -69,31 +71,43 @@ def clean_code(full):
     return code.strip()
 
 
-def call_nvidia(prompt):
-    gemini_key = os.environ.get("GEMINI_API_KEY")
-    nvidia_key = NVIDIA_API_KEY
+def call_ai(prompt):
     print("[AGENT] Calling AI API...", flush=True)
-    if gemini_key:
+    if GEMINI_API_KEY:
         try:
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + gemini_key
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + GEMINI_API_KEY
             body = {"contents": [{"parts": [{"text": prompt}]}]}
             r = requests.post(url, json=body, timeout=60)
             if r.status_code == 200:
                 full = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                print("[AGENT] Gemini raw: " + full[:150], flush=True)
                 code = clean_code(full)
-               if code:
+                if code:
                     print("[AGENT] Strategy ready via Gemini", flush=True)
                     return code
-                else:
-                    print("[AGENT] Gemini returned no valid function", flush=True)
-                    print("[AGENT] Raw: " + full[:200], flush=True)
+                print("[AGENT] Gemini returned no valid function", flush=True)
+            else:
+                print("[AGENT] Gemini error: " + str(r.status_code) + " " + r.text[:100], flush=True)
         except Exception as e:
             print("[AGENT] Gemini failed: " + str(e), flush=True)
-    if nvidia_key:
+    if NVIDIA_API_KEY:
         try:
-            headers = {"Authorization": "Bearer " + nvidia_key, "Content-Type": "application/json"}
-            body = {"model": "deepseek-ai/deepseek-v4-pro", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800, "temperature": 0.3}
-            r = requests.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=body, timeout=120)
+            headers = {
+                "Authorization": "Bearer " + NVIDIA_API_KEY,
+                "Content-Type": "application/json"
+            }
+            body = {
+                "model": "deepseek-ai/deepseek-v4-pro",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 800,
+                "temperature": 0.3
+            }
+            r = requests.post(
+                "https://integrate.api.nvidia.com/v1/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=120
+            )
             if r.status_code == 429:
                 print("[AGENT] NVIDIA rate limited waiting 60 seconds...", flush=True)
                 time.sleep(60)
@@ -121,7 +135,7 @@ def search_strategy(all_data, market_summary, coins):
             prompt = build_prompt(market_summary, coins)
         else:
             prompt = build_fix_prompt(market_summary, strategy_code, failed_tests, coins)
-        strategy_code = call_nvidia(prompt)
+        strategy_code = call_ai(prompt)
         if strategy_code is None:
             time.sleep(60)
             continue
@@ -207,90 +221,4 @@ def trading_loop(all_data, market_summary):
         try:
             with lock:
                 strat = active_strategy
-                coins = list(active_good_coins)
-            if strat and coins:
-                print("[TRADER] Trading: " + str(coins), flush=True)
-                execute_strategy(strat, all_data, coins)
-                trade_count += 1
-                get_performance_summary()
-                print("[TRADER] Trade count: " + str(trade_count) + " next revalidation at: " + str(revalidate_every), flush=True)
-                if trade_count >= revalidate_every:
-                    print("[TRADER] Triggering revalidation after " + str(trade_count) + " trades", flush=True)
-                    revalidate(all_data, market_summary)
-            else:
-                print("[TRADER] Waiting for approved coins...", flush=True)
-            time.sleep(3600)
-        except Exception as e:
-            print("[TRADER] Error: " + str(e), flush=True)
-            time.sleep(300)
-
-
-def run_agent():
-    global active_strategy, active_good_coins
-    if not NVIDIA_API_KEY:
-        print("[ERROR] NVIDIA_API_KEY missing", flush=True)
-        sys.exit(1)
-    if not os.environ.get("COINDCX_API_KEY"):
-        print("[ERROR] COINDCX_API_KEY missing", flush=True)
-        sys.exit(1)
-    if not os.environ.get("COINDCX_SECRET"):
-        print("[ERROR] COINDCX_SECRET missing", flush=True)
-        sys.exit(1)
-    print("[AGENT] All keys found", flush=True)
-    threading.Thread(target=start_api, daemon=True).start()
-    loop_count = 0
-    while True:
-        try:
-            loop_count += 1
-            print("[AGENT] Loop " + str(loop_count), flush=True)
-            all_data = get_top5_ohlcv()
-            if not all_data:
-                print("[AGENT] No data, waiting 10 mins", flush=True)
-                time.sleep(600)
-                continue
-            market_summary = get_market_summary(all_data)
-            saved_code, saved_coins = load_strategy()
-            if saved_code and saved_coins:
-                with lock:
-                    active_strategy = saved_code
-                    active_good_coins = saved_coins
-                print("[AGENT] Resuming saved strategy for: " + str(saved_coins), flush=True)
-                remaining = [c for c in ["BTC", "ETH", "BNB", "SOL", "XRP"] if c not in saved_coins]
-                if remaining:
-                    print("[AGENT] Searching for remaining: " + str(remaining), flush=True)
-                    search_thread = threading.Thread(
-                        target=search_strategy,
-                        args=(all_data, market_summary, remaining),
-                        daemon=True
-                    )
-                    search_thread.start()
-                else:
-                    search_thread = None
-            else:
-                bump_strategy_version()
-                active_good_coins = []
-                active_strategy = None
-                search_thread = threading.Thread(
-                    target=search_strategy,
-                    args=(all_data, market_summary, ["BTC", "ETH", "BNB", "SOL", "XRP"]),
-                    daemon=True
-                )
-                search_thread.start()
-            threading.Thread(
-                target=trading_loop,
-                args=(all_data, market_summary),
-                daemon=True
-            ).start()
-            if search_thread:
-                search_thread.join()
-            print("[AGENT] Search done. Sleeping 1 hour", flush=True)
-            time.sleep(3600)
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            print("[AGENT] Error: " + str(e), flush=True)
-            time.sleep(900)
-
-
-if __name__ == "__main__":
-    run_agent()
+                coins
