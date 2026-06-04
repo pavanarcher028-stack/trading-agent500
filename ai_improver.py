@@ -1,5 +1,17 @@
-import google.generativeai as genai
-import requests
+try:
+    import google.generativeai as genai
+    GOOGLE_AI_AVAILABLE = True
+except ImportError:
+    GOOGLE_AI_AVAILABLE = False
+    print("[WARNING] google-generativeai not installed. Install with: pip install google-generativeai", flush=True)
+
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    print("[WARNING] requests not installed. Install with: pip install requests", flush=True)
+
 import json
 import os
 
@@ -10,6 +22,10 @@ def improve_strategy_with_google_ai(strategy_code, feedback_list, coin):
     Requires GOOGLE_API_KEY environment variable
     """
     try:
+        if not GOOGLE_AI_AVAILABLE:
+            print("[GOOGLE_AI] google-generativeai not available. Skipping.", flush=True)
+            return None
+        
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
             print("[GOOGLE_AI] GOOGLE_API_KEY not set. Skipping Google AI improvement.", flush=True)
@@ -78,9 +94,6 @@ def get_signals(df):
         print("[GOOGLE_AI] Strategy improvement for " + coin + " generated successfully", flush=True)
         return improved_code
         
-    except ImportError:
-        print("[GOOGLE_AI] google-generativeai library not installed. Install with: pip install google-generativeai", flush=True)
-        return None
     except Exception as e:
         print("[GOOGLE_AI] Error during strategy improvement: " + str(e), flush=True)
         return None
@@ -92,6 +105,10 @@ def validate_with_nvidia_ai(strategy_code, coin):
     Requires NVIDIA_API_KEY and NVIDIA_API_ENDPOINT environment variables
     """
     try:
+        if not REQUESTS_AVAILABLE:
+            print("[NVIDIA_AI] requests library not available. Skipping validation.", flush=True)
+            return {"valid": True, "errors": [], "warnings": []}
+        
         api_key = os.environ.get("NVIDIA_API_KEY")
         api_endpoint = os.environ.get("NVIDIA_API_ENDPOINT", "https://integrate.api.nvidia.com/v1/chat/completions")
         
@@ -150,7 +167,6 @@ Respond ONLY in JSON format:
         
         # Extract JSON from response
         try:
-            # Try to find JSON in the response
             json_start = content.find("{")
             json_end = content.rfind("}") + 1
             if json_start != -1 and json_end > json_start:
@@ -171,9 +187,6 @@ Respond ONLY in JSON format:
         
         return validation_result
         
-    except requests.exceptions.RequestException as e:
-        print("[NVIDIA_AI] Request error: " + str(e), flush=True)
-        return {"valid": True, "errors": [], "warnings": []}
     except Exception as e:
         print("[NVIDIA_AI] Error during code validation: " + str(e), flush=True)
         return {"valid": True, "errors": [], "warnings": []}
@@ -184,6 +197,9 @@ def fix_strategy_with_nvidia(strategy_code, validation_result, coin):
     Use NVIDIA AI to fix errors found in the strategy code
     """
     try:
+        if not REQUESTS_AVAILABLE:
+            return strategy_code
+        
         api_key = os.environ.get("NVIDIA_API_KEY")
         api_endpoint = os.environ.get("NVIDIA_API_ENDPOINT", "https://integrate.api.nvidia.com/v1/chat/completions")
         
@@ -434,13 +450,6 @@ def generate_html_report(partial_fails, improved_strategies):
                     margin: 10px 0;
                     border-radius: 3px;
                 }
-                .validation-status {
-                    background: #fff3e0;
-                    padding: 10px;
-                    border-left: 4px solid #f57c00;
-                    margin: 10px 0;
-                    border-radius: 3px;
-                }
                 .timestamp {
                     color: #999;
                     font-size: 0.9em;
@@ -510,7 +519,7 @@ def generate_html_report(partial_fails, improved_strategies):
                 <li><strong>Code Generation:</strong> Google Gemini 2.0 Flash</li>
                 <li><strong>Code Validation & Fixing:</strong> NVIDIA NIM - Llama 3.1 70B</li>
             </ul>
-            <p>Generated using Dual AI Pipeline for Quantitative Trading Research</p>
+            <p>Deployed on Railway.com - Scalable Quantitative Trading Research</p>
         </footer>
         </body>
         </html>
