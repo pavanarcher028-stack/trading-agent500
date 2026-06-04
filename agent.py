@@ -9,7 +9,7 @@ from data import get_top5_ohlcv, get_market_summary
 from backtest import run_backtest, is_strategy_good, get_metric_statistics
 from trader import execute_strategy
 from monitor import needs_regeneration, bump_strategy_version, get_performance_summary
-from ai_improver import batch_improve_strategies, generate_html_report
+from ai_improver import batch_improve_and_validate_strategies, generate_html_report
 
 print("TRADING AGENT STARTED", flush=True)
 
@@ -154,9 +154,9 @@ def search_strategy(all_data, coins):
              results = run_backtest(strat, subset_data)
              good_coins, partial_fails = is_strategy_good(results)
              
-             if partial_fails and os.environ.get("ANTHROPIC_API_KEY"):
-                 print("[SEARCH] Attempting AI improvement for partial fails", flush=True)
-                 improved_strategies = batch_improve_strategies(partial_fails, strat)
+             if partial_fails and (os.environ.get("GOOGLE_API_KEY") or os.environ.get("NVIDIA_API_KEY")):
+                 print("[SEARCH] Attempting AI improvement with dual pipeline...", flush=True)
+                 improved_strategies = batch_improve_and_validate_strategies(partial_fails, strat)
                  
                  if improved_strategies:
                      generate_html_report(partial_fails, improved_strategies)
@@ -195,9 +195,9 @@ def revalidate(all_data):
      still_good, partial_fails = is_strategy_good(results)
      failed_coins = [c for c in coins if c not in still_good]
      
-     if partial_fails and os.environ.get("ANTHROPIC_API_KEY"):
-         print("[REVALIDATE] Attempting AI improvement for degraded strategies", flush=True)
-         improved_strategies = batch_improve_strategies(partial_fails, strat)
+     if partial_fails and (os.environ.get("GOOGLE_API_KEY") or os.environ.get("NVIDIA_API_KEY")):
+         print("[REVALIDATE] Attempting AI improvement with dual pipeline...", flush=True)
+         improved_strategies = batch_improve_and_validate_strategies(partial_fails, strat)
          if improved_strategies:
              generate_html_report(partial_fails, improved_strategies)
      
@@ -252,6 +252,7 @@ def run_agent():
          print("[ERROR] COINDCX_SECRET missing", flush=True)
          sys.exit(1)
      print("[AGENT] All keys found", flush=True)
+     print("[AGENT] AI Providers: Google Gemini (Code Gen) + NVIDIA NIM (Validation)", flush=True)
      threading.Thread(target=start_api, daemon=True).start()
      loop_count = 0
      while True:
