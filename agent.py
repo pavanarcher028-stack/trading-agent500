@@ -60,7 +60,7 @@ def call_nvidia(prompt):
         "Content-Type": "application/json"
     }
     body = {
-        "model": "meta/llama-3.3-70b-instruct",
+       "model": "deepseek-ai/deepseek-r1", ,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 800,
         "temperature": 0.5
