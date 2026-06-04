@@ -32,10 +32,9 @@ def build_prompt(market_summary, coins):
     p += "The function MUST start with: import numpy as np\n"
     p += "Use ONE of these proven quant math approaches:\n"
     p += "1. Z-Score mean reversion: zscore = (price - rolling_mean) / rolling_std, buy when zscore < -1.5, sell when zscore > 1.5\n"
-    p += "2. Hurst exponent regime: calculate rolling variance ratio, buy in mean-reverting regime, sell in trending regime\n"
-    p += "3. Volatility breakout: ATR-based entry when price breaks above upper band with volume confirmation\n"
-    p += "4. Momentum z-score: standardized returns momentum with rolling 20 period window\n"
-    p += "5. Ornstein-Uhlenbeck: estimate mean reversion speed, trade when price deviates more than 1.5 sigma\n"
+    p += "2. Volatility breakout: ATR-based entry when price breaks above upper band with volume confirmation\n"
+    p += "3. Momentum z-score: standardized returns momentum with rolling 20 period window\n"
+    p += "4. Ornstein-Uhlenbeck: estimate mean reversion speed, trade when price deviates more than 1.5 sigma\n"
     p += "IMPORTANT: Strategy must generate at least 15 trades over 1000 hourly candles.\n"
     p += "Use rolling windows of 20-50 periods maximum.\n"
     p += "Stop loss enforced externally at 3 percent. Take profit at 6 percent.\n"
@@ -89,8 +88,8 @@ def call_nvidia(prompt):
             json=body,
             timeout=120
         )
-       if r.status_code == 429:
-            print("[AGENT] Rate limited — waiting 60 seconds...", flush=True)
+        if r.status_code == 429:
+            print("[AGENT] Rate limited waiting 60 seconds...", flush=True)
             time.sleep(60)
             return None
         if r.status_code != 200:
@@ -122,7 +121,7 @@ def search_strategy(all_data, market_summary, coins):
             prompt = build_fix_prompt(market_summary, strategy_code, failed_tests, coins)
         strategy_code = call_nvidia(prompt)
         if strategy_code is None:
-            time.sleep(30)
+            time.sleep(60)
             continue
         subset_data = {c: all_data[c] for c in coins if c in all_data}
         results = run_backtest(strategy_code, subset_data)
@@ -182,7 +181,7 @@ def revalidate(all_data, market_summary):
     still_good = is_strategy_good(results)
     failed_coins = [c for c in coins if c not in still_good]
     if failed_coins:
-        print("[REVALIDATE] " + str(failed_coins) + " failed — searching new strategy", flush=True)
+        print("[REVALIDATE] " + str(failed_coins) + " failed searching new strategy", flush=True)
         with lock:
             for c in failed_coins:
                 if c in active_good_coins:
@@ -194,7 +193,7 @@ def revalidate(all_data, market_summary):
             daemon=True
         ).start()
     else:
-        print("[REVALIDATE] All coins still passing — keeping strategy", flush=True)
+        print("[REVALIDATE] All coins still passing keeping strategy", flush=True)
     trade_count = 0
     revalidate_every = random.randint(10, 20)
     print("[REVALIDATE] Next check in " + str(revalidate_every) + " trades", flush=True)
@@ -256,13 +255,15 @@ def run_agent():
                 print("[AGENT] Resuming saved strategy for: " + str(saved_coins), flush=True)
                 remaining = [c for c in ["BTC", "ETH", "BNB", "SOL", "XRP"] if c not in saved_coins]
                 if remaining:
-                    print("[AGENT] Searching strategy for remaining: " + str(remaining), flush=True)
+                    print("[AGENT] Searching for remaining: " + str(remaining), flush=True)
                     search_thread = threading.Thread(
                         target=search_strategy,
                         args=(all_data, market_summary, remaining),
                         daemon=True
                     )
                     search_thread.start()
+                else:
+                    search_thread = None
             else:
                 bump_strategy_version()
                 active_good_coins = []
@@ -273,13 +274,12 @@ def run_agent():
                     daemon=True
                 )
                 search_thread.start()
-            trade_thread = threading.Thread(
+            threading.Thread(
                 target=trading_loop,
                 args=(all_data, market_summary),
                 daemon=True
-            )
-            trade_thread.start()
-            if "search_thread" in dir():
+            ).start()
+            if search_thread:
                 search_thread.join()
             print("[AGENT] Search done. Sleeping 1 hour", flush=True)
             time.sleep(3600)
