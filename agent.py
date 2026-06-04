@@ -62,7 +62,7 @@ def call_nvidia(prompt):
     body = {
         "model": "meta/llama-3.3-70b-instruct",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1500,
+        "max_tokens": 800,
         "temperature": 0.5
     }
     try:
@@ -70,7 +70,7 @@ def call_nvidia(prompt):
             "https://integrate.api.nvidia.com/v1/chat/completions",
             headers=headers,
             json=body,
-            timeout=60
+            timeout=120
         )
         if r.status_code != 200:
             print("[AGENT] NVIDIA error: " + str(r.text), flush=True)
