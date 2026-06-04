@@ -89,6 +89,10 @@ def call_nvidia(prompt):
             json=body,
             timeout=120
         )
+       if r.status_code == 429:
+            print("[AGENT] Rate limited — waiting 60 seconds...", flush=True)
+            time.sleep(60)
+            return None
         if r.status_code != 200:
             print("[AGENT] NVIDIA error: " + str(r.text), flush=True)
             return None
@@ -160,7 +164,7 @@ def search_strategy(all_data, market_summary, coins):
         if not coins:
             print("[SEARCH] All coins approved", flush=True)
             break
-        time.sleep(30)
+        time.sleep(60)
     print("[SEARCH] Done. Active: " + str(active_good_coins), flush=True)
 
 
