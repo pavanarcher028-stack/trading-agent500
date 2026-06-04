@@ -166,7 +166,7 @@ def search_strategy(all_data, coins):
                     break
         except Exception as e:
             print("[SEARCH] Strategy " + str(idx + 1) + " error: " + str(e), flush=True)
-        time.sleep(100)
+        time.sleep(2)
     remaining = [c for c in coins if c not in active_good_coins]
     if remaining:
         print("[SEARCH] No passing strategy for: " + str(remaining) + " skipping", flush=True)
@@ -221,10 +221,10 @@ def trading_loop(all_data):
                     revalidate(all_data)
             else:
                 print("[TRADER] Waiting for approved coins...", flush=True)
-            time.sleep(100)
+            time.sleep(300)
         except Exception as e:
             print("[TRADER] Error: " + str(e), flush=True)
-            time.sleep(100)
+            time.sleep(300)
 
 
 def run_agent():
@@ -244,8 +244,8 @@ def run_agent():
             print("[AGENT] Loop " + str(loop_count), flush=True)
             all_data = get_top5_ohlcv()
             if not all_data:
-                print("[AGENT] No data, waiting 10 mins", flush=True)
-                time.sleep(600)
+                print("[AGENT] No data, waiting 5 mins", flush=True)
+                time.sleep(300)
                 continue
             saved_code, saved_coins = load_strategy()
             if saved_code and saved_coins:
@@ -281,12 +281,12 @@ def run_agent():
             if search_thread:
                 search_thread.join()
             print("[AGENT] Search done. Sleeping 5 mins", flush=True)
-             time.sleep(300) 
+            time.sleep(300)
         except KeyboardInterrupt:
             break
         except Exception as e:
             print("[AGENT] Error: " + str(e), flush=True)
-            time.sleep(900)
+            time.sleep(300)
 
 
 if __name__ == "__main__":
