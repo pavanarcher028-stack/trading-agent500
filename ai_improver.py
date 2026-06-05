@@ -80,11 +80,11 @@ def improve_strategy_with_google_ai(strategy_code, failed_metrics, coin, item=No
     prompt += "2. ONLY fix the one failing metric\n"
     prompt += "3. Use ONLY pandas and numpy\n"
     prompt += "4. First two lines inside function must be: import pandas as pd and import numpy as np\n"
-    prompt += "5. Return pandas Series: 1=buy -1=sell 0=hold\n"
-    prompt += "6. Generate at least 10 signals over 1000 candles\n"
-    prompt += "\n"
-    prompt += "Return ONLY the complete get_signals(df) function. No markdown. No explanation.\n"
-
+    prompt += "4. YOU must define SL_PCT and TP_PCT inside the function — choose values that maximize Sharpe\n"
+    prompt += "   Example: SL_PCT = 2.0 means exit if price drops 2 percent from entry\n"
+    prompt += "   Example: TP_PCT = 5.0 means exit if price rises 5 percent from entry\n"
+    prompt += "   For mean reversion strategies use tight SL like 1.5 to 2.5 and TP like 2 to 4\n"
+    prompt += "   For momentum strategies use wider SL like 3 to 5 and TP like 6 to 12\n"
     try:
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + api_key
         body = {"contents": [{"parts": [{"text": prompt}]}]}
