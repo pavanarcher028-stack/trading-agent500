@@ -117,8 +117,9 @@ def validate_with_nvidia(strategy_code, coin):
 def batch_improve_and_validate_strategies(partial_fails, strategy_code):
     improved = {}
     for item in partial_fails:
-        if len(item["failed_metrics"]) > 2:
-            print("[PIPELINE] " + item["coin"] + " has " + str(len(item["failed_metrics"])) + " failures — skipping AI, moving to next strategy", flush=True)
+        for item in partial_fails:
+        if len(item["failed_metrics"]) != 1:
+            print("[PIPELINE] " + item["coin"] + " has " + str(len(item["failed_metrics"])) + " failures — only improving when exactly 1 fails, skipping", flush=True)
             continue
         coin = item["coin"]
         failed_metrics = item["failed_metrics"]
