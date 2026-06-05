@@ -117,27 +117,25 @@ def validate_with_nvidia(strategy_code, coin):
 def batch_improve_and_validate_strategies(partial_fails, strategy_code):
     improved = {}
     for item in partial_fails:
-        for item in partial_fails:
-        if len(item["failed_metrics"]) != 1:
-            print("[PIPELINE] " + item["coin"] + " has " + str(len(item["failed_metrics"])) + " failures — only improving when exactly 1 fails, skipping", flush=True)
-            continue
         coin = item["coin"]
         failed_metrics = item["failed_metrics"]
+        if len(failed_metrics) != 1:
+            print("[PIPELINE] " + coin + " has " + str(len(failed_metrics)) + " failures — skipping", flush=True)
+            continue
         print("[PIPELINE] " + coin + " fixing only: " + str(failed_metrics), flush=True)
-        new_code = improve_strategy_with_google_ai(strategy_code, failed_metrics, coin)
         import time
         time.sleep(15)
+        new_code = improve_strategy_with_google_ai(strategy_code, failed_metrics, coin)
         if not new_code:
             print("[PIPELINE] Could not improve " + coin, flush=True)
             continue
         validation = validate_with_nvidia(new_code, coin)
         if validation.get("errors"):
-            print("[PIPELINE] " + coin + " has errors after fix: " + str(validation["errors"]), flush=True)
+            print("[PIPELINE] " + coin + " has errors: " + str(validation["errors"]), flush=True)
         else:
             improved[coin] = new_code
-            print("[PIPELINE] " + coin + " improved and validated successfully", flush=True)
+            print("[PIPELINE] " + coin + " improved and validated", flush=True)
     return improved
-
 
 def generate_html_report(partial_fails, improved_strategies):
     return None
