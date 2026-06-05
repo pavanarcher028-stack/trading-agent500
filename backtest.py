@@ -85,7 +85,7 @@ def run_backtest(strategy_code, all_data):
                 elif position > 0.0:
                     hold_count += 1
                     pct = (price - buy_price) / buy_price * 100.0
-                    if pct <= -3.0 or pct >= 6.0 or hold_count >= 48 or sig == -1:
+                    if pct <= -2.0 or pct >= 4.0 or hold_count >= 48 or sig == -1:
                         new_capital = position * price
                         profit = new_capital - capital
                         trades.append(profit)
