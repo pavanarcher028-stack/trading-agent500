@@ -18,8 +18,10 @@ COIN_MAP = {
     "XRP": "XRPINR"
 }
 
-TRADE_PERCENT = 0.30
+TRADE_PERCENT = 0.10
 MIN_TRADE = 110
+MAX_TRADE = 500
+
 
 def sign_request(body_dict):
     json_body = json.dumps(body_dict, separators=(",", ":"))
@@ -35,6 +37,7 @@ def sign_request(body_dict):
     }
     return json_body, headers
 
+
 def get_balance():
     try:
         timestamp = int(round(time.time() * 1000))
@@ -44,10 +47,16 @@ def get_balance():
             data=json_body,
             headers=headers
         )
-        balances = response.json()
+        resp = response.json()
+        if isinstance(resp, dict):
+            balances = resp.get("data", resp.get("balances", []))
+        else:
+            balances = resp
         for b in balances:
-            if b["currency"] == "INR":
-                inr = float(b["balance"])
+            if not isinstance(b, dict):
+                continue
+            if b.get("currency") == "INR":
+                inr = float(b.get("balance", 0))
                 print("[TRADER] INR balance: Rs." + str(round(inr, 2)), flush=True)
                 return inr
         print("[TRADER] INR balance not found", flush=True)
@@ -55,6 +64,34 @@ def get_balance():
     except Exception as e:
         print("[TRADER] Balance fetch failed: " + str(e), flush=True)
         return 0
+
+
+def get_coin_balance(symbol):
+    try:
+        timestamp = int(round(time.time() * 1000))
+        json_body, headers = sign_request({"timestamp": timestamp})
+        response = requests.post(
+            BASE_URL + "/exchange/v1/users/balances",
+            data=json_body,
+            headers=headers
+        )
+        resp = response.json()
+        if isinstance(resp, dict):
+            balances = resp.get("data", resp.get("balances", []))
+        else:
+            balances = resp
+        for b in balances:
+            if not isinstance(b, dict):
+                continue
+            if b.get("currency") == symbol:
+                amount = float(b.get("balance", 0))
+                print("[TRADER] " + symbol + " balance: " + str(amount), flush=True)
+                return amount
+        return 0
+    except Exception as e:
+        print("[TRADER] Coin balance fetch failed: " + str(e), flush=True)
+        return 0
+
 
 def place_order(side, coin_symbol, quantity):
     try:
@@ -73,11 +110,12 @@ def place_order(side, coin_symbol, quantity):
             headers=headers
         )
         result = response.json()
-        print("[TRADER] " + side.upper() + " " + coin_symbol + " qty=" + str(quantity), flush=True)
+        print("[TRADER] " + side.upper() + " " + coin_symbol + " qty=" + str(quantity) + " result=" + str(result), flush=True)
         return result
     except Exception as e:
         print("[TRADER] Order failed " + coin_symbol + ": " + str(e), flush=True)
         return None
+
 
 def execute_strategy(strategy_code, all_data, good_coins):
     if not good_coins:
@@ -90,15 +128,18 @@ def execute_strategy(strategy_code, all_data, good_coins):
 
     inr_balance = get_balance()
     if inr_balance < MIN_TRADE:
-        print("[TRADER] Balance too low", flush=True)
+        print("[TRADER] Balance too low - need at least Rs." + str(MIN_TRADE), flush=True)
         return {}
 
     trade_amount = inr_balance * TRADE_PERCENT
     if trade_amount < MIN_TRADE:
         trade_amount = MIN_TRADE
         print("[TRADER] Using minimum Rs.110 per trade", flush=True)
-    else:
-        print("[TRADER] Using Rs." + str(round(trade_amount, 2)) + " per trade", flush=True)
+    if trade_amount > MAX_TRADE:
+        trade_amount = MAX_TRADE
+        print("[TRADER] Capped at maximum Rs.500 per trade", flush=True)
+
+    print("[TRADER] Trade amount: Rs." + str(round(trade_amount, 2)), flush=True)
 
     results = {}
 
@@ -106,26 +147,32 @@ def execute_strategy(strategy_code, all_data, good_coins):
         try:
             df = all_data[coin]
             signals = get_signals(df)
-            last_signal = signals.iloc[-1]
+            last_signal = int(signals.iloc[-1])
             coin_symbol = COIN_MAP.get(coin)
 
             if not coin_symbol:
                 print("[TRADER] No pair for " + coin, flush=True)
                 continue
 
-            current_price = df["close"].iloc[-1]
+            current_price = float(df["close"].iloc[-1])
 
             if last_signal == 1:
                 quantity = round(trade_amount / current_price, 6)
-                print("[TRADER] BUY " + coin_symbol, flush=True)
+                print("[TRADER] BUY " + coin + " qty=" + str(quantity) + " at Rs." + str(round(current_price, 2)), flush=True)
                 order = place_order("buy", coin_symbol, quantity)
-                results[coin] = {"action": "buy", "order": order}
+                results[coin] = {"action": "buy", "order": order, "price": current_price, "quantity": quantity}
 
             elif last_signal == -1:
-                quantity = round(trade_amount / current_price, 6)
-                print("[TRADER] SELL " + coin_symbol, flush=True)
-                order = place_order("sell", coin_symbol, quantity)
-                results[coin] = {"action": "sell", "order": order}
+                coin_sym = coin_symbol.replace("INR", "").replace("USDT", "")
+                held = get_coin_balance(coin_sym)
+                if held > 0:
+                    quantity = round(held, 6)
+                    print("[TRADER] SELL " + coin + " qty=" + str(quantity), flush=True)
+                    order = place_order("sell", coin_symbol, quantity)
+                    results[coin] = {"action": "sell", "order": order, "price": current_price, "quantity": quantity}
+                else:
+                    print("[TRADER] SELL signal but no " + coin + " held - skipping", flush=True)
+                    results[coin] = {"action": "hold", "order": None}
 
             else:
                 print("[TRADER] HOLD " + coin, flush=True)
