@@ -2,6 +2,9 @@ import os
 import requests
 import time
 import json
+import re
+
+_seen_strategies = {}
 
 
 SYSTEM_PROMPT = """You are QUANT-GPT, a quantitative trading AI that generates ONLY strategies proven to pass rigorous backtests.
@@ -166,6 +169,42 @@ def build_improvement_prompt(strategy_code, failed_metrics, coin, item):
     return prompt
 
 
+def normalize_code(code):
+    return re.sub(r'\s+', '', code).strip()
+
+
+def is_duplicate_strategy(code, coin, seen_set):
+    norm = normalize_code(code)
+    for existing in seen_set.get(coin, []):
+        if normalize_code(existing) == norm:
+            return True
+    return False
+
+
+def generate_unique_strategy(generate_fn, prompt, coin, original_code, max_retries=3):
+    seen = _seen_strategies.setdefault(coin, [])
+    if original_code:
+        seen.append(original_code)
+    current_prompt = prompt
+    for attempt in range(max_retries):
+        code = generate_fn(current_prompt)
+        if not code:
+            return None
+        if is_duplicate_strategy(code, coin, {coin: seen}):
+            print("[UNIQUE] Strategy " + str(attempt + 1) + " is duplicate - retrying...", flush=True)
+            current_prompt = prompt + "\n\nSTRATEGY REJECTED: The code you just gave is IDENTICAL to a previous strategy.\n"
+            current_prompt += "You MUST write a COMPLETELY DIFFERENT strategy using:\n"
+            current_prompt += "- Different indicators (e.g. switch from z-score to RSI or MACD)\n"
+            current_prompt += "- Different periods (e.g. use 14-period instead of 20-period)\n"
+            current_prompt += "- Different logic (e.g. add volume filter or trend confirmation)\n"
+            current_prompt += "Do NOT repeat the same indicator combinations. Be creative.\n"
+            continue
+        seen.append(code)
+        return code
+    print("[UNIQUE] Failed to generate unique strategy after " + str(max_retries) + " attempts", flush=True)
+    return None
+
+
 def parse_code(text):
     if "```python" in text:
         code = text.split("```python")[1].split("```")[0].strip()
@@ -207,7 +246,7 @@ def call_gemini(prompt):
 def improve_strategy_with_google_ai(strategy_code, failed_metrics, coin, item=None):
     print("[GOOGLE_AI] Building improvement prompt for " + coin + " fixing: " + str(failed_metrics), flush=True)
     prompt = build_improvement_prompt(strategy_code, failed_metrics, coin, item)
-    code = call_gemini(prompt)
+    code = generate_unique_strategy(call_gemini, prompt, coin, strategy_code)
     if code:
         print("[GOOGLE_AI] Strategy improved for " + coin, flush=True)
         return code, None
@@ -267,7 +306,7 @@ def improve_strategy_with_nvidia(strategy_code, failed_metrics, coin, item=None,
         prompt += "If the error mentions rate limiting, connection timeout, or auth - ignore it and just produce a working strategy.\n"
         prompt += "If the error was a backtest failure, specifically fix that metric.\n"
         prompt += "Return ONLY the complete get_signals(df) function. No markdown. No explanation.\n"
-    code = call_nvidia_for_improvement(prompt)
+    code = generate_unique_strategy(call_nvidia_for_improvement, prompt, coin, strategy_code)
     if code:
         print("[NVIDIA_AI] Strategy improved for " + coin, flush=True)
     return code
