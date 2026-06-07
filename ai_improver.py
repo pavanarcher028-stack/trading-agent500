@@ -266,6 +266,9 @@ def batch_improve_and_validate_strategies(partial_fails, strategy_code):
     for item in partial_fails:
         coin = item["coin"]
         failed_metrics = item["failed_metrics"]
+        if len(failed_metrics) != 1:
+            print("[PIPELINE] " + coin + " has " + str(len(failed_metrics)) + " failures - skip, only fix when exactly 1 fails", flush=True)
+            continue
         print("[PIPELINE] Processing " + coin + " - fixing: " + str(failed_metrics), flush=True)
         print("[PIPELINE] Current scores - Sharpe: " + str(item.get("sharpe")) + " Win: " + str(item.get("win_rate")) + "% DD: " + str(item.get("max_drawdown")) + "% Trades: " + str(item.get("trades")), flush=True)
         time.sleep(90)
