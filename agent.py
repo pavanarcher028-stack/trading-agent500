@@ -9,7 +9,7 @@ from strategy_store import save_strategy, load_strategy
 from data import get_top5_ohlcv, get_market_summary
 from backtest import run_backtest, is_strategy_good
 from trader import execute_strategy
-from monitor import needs_regeneration, bump_strategy_version, get_performance_summary
+from monitor import bump_strategy_version, get_performance_summary
 # AI improver no longer used - fallback strategies only
 from data import get_market_summary
 

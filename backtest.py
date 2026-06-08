@@ -52,9 +52,9 @@ def run_backtest(strategy_code, all_data):
             if tp_match:
                 tp_pct = float(tp_match.group(1))
             if sl_match or tp_match:
-                print("[BACKTEST] AI defined SL=" + str(sl_pct) + "% TP=" + str(tp_pct) + "%", flush=True)
+                print("[BACKTEST] SL=" + str(sl_pct) + "% TP=" + str(tp_pct) + "%", flush=True)
             else:
-                print("[BACKTEST] No SL/TP from AI - strategy manages own exits", flush=True)
+                print("[BACKTEST] No SL/TP in strategy code", flush=True)
             local_env = {}
             exec(strategy_code, local_env)
             get_signals = local_env["get_signals"]
