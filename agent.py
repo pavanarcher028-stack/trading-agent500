@@ -25,67 +25,24 @@ STRATEGIES = [
 def get_signals(df):
     import pandas as pd
     import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
+    SL_PCT = 1.8
+    TP_PCT = 3.5
     close = df['close']
-    rolling_mean = close.rolling(30).mean()
-    rolling_std = close.rolling(30).std()
-    zscore = (close - rolling_mean) / rolling_std
-    signals = pd.Series(0, index=df.index)
-    signals[zscore < -1.5] = 1
-    signals[zscore > 1.5] = -1
-    return signals
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.5
-    TP_PCT = 5.0
-    close = df['close']
-    high = df['high']
-    low = df['low']
     volume = df['volume']
-    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
-    upper = close.rolling(20).mean() + 1.5 * atr
-    lower = close.rolling(20).mean() - 1.5 * atr
+    sma = close.rolling(10).mean()
+    std = close.rolling(10).std()
+    zscore = (close - sma) / std
     vol_avg = volume.rolling(20).mean()
-    signals = pd.Series(0, index=df.index)
-    signals[(close > upper) & (volume > vol_avg)] = 1
-    signals[(close < lower) & (volume > vol_avg)] = -1
-    return signals
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    returns = close.pct_change()
-    mom_mean = returns.rolling(20).mean()
-    mom_std = returns.rolling(20).std()
-    mom_zscore = (returns - mom_mean) / mom_std
-    signals = pd.Series(0, index=df.index)
-    signals[mom_zscore > 1.5] = 1
-    signals[mom_zscore < -1.5] = -1
-    return signals
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    mu = close.rolling(50).mean()
-    sigma = close.rolling(50).std()
-    deviation = (close - mu) / sigma
-    signals = pd.Series(0, index=df.index)
-    signals[deviation < -1.5] = 1
-    signals[deviation > 1.5] = -1
-    return signals
+    ema50 = close.ewm(span=50).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[zscore < -1.2] = 1
+    raw[zscore > 1.2] = -1
+    trend_ok = close > ema50
+    vol_ok = volume > vol_avg
+    signals = raw * 1
+    signals[~(trend_ok & vol_ok)] = 0
+    signals = signals / close.rolling(20).std()
+    return signals.fillna(0)
 """,
 """
 def get_signals(df):
@@ -96,68 +53,17 @@ def get_signals(df):
     close = df['close']
     volume = df['volume']
     delta = close.diff()
-    gain = delta.where(delta > 0, 0.0).rolling(9).mean()
-    loss = -delta.where(delta < 0, 0.0).rolling(9).mean()
+    gain = delta.where(delta > 0, 0.0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0.0).rolling(14).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     vol_avg = volume.rolling(20).mean()
-    signals = pd.Series(0, index=df.index)
-    signals[(rsi < 30) & (volume > vol_avg)] = 1
-    signals[(rsi > 70) & (volume > vol_avg)] = -1
-    return signals
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    sma20 = close.rolling(20).mean()
-    std20 = close.rolling(20).std()
-    upper = sma20 + 2 * std20
-    lower = sma20 - 2 * std20
-    bandwidth = (upper - lower) / sma20
-    signals = pd.Series(0, index=df.index)
-    signals[(close < lower) & (bandwidth > 0.02)] = 1
-    signals[(close > upper) & (bandwidth > 0.02)] = -1
-    return signals
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    fast = close.ewm(span=12).mean()
-    slow = close.ewm(span=26).mean()
-    macd = fast - slow
-    signal = macd.ewm(span=9).mean()
-    hist = macd - signal
-    zscore = (hist - hist.rolling(30).mean()) / hist.rolling(30).std()
-    signals = pd.Series(0, index=df.index)
-    signals[zscore > 1.0] = 1
-    signals[zscore < -1.0] = -1
-    return signals
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    high = df['high']
-    low = df['low']
-    lowest = low.rolling(14).min()
-    highest = high.rolling(14).max()
-    stoch = 100 * (close - lowest) / (highest - lowest)
-    stoch_ma = stoch.rolling(3).mean()
-    signals = pd.Series(0, index=df.index)
-    signals[(stoch_ma < 20) & (stoch_ma.shift(1) < 20)] = 1
-    signals[(stoch_ma > 80) & (stoch_ma.shift(1) > 80)] = -1
-    return signals
+    ema50 = close.ewm(span=50).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(rsi < 35) & (close > ema50) & (volume > vol_avg)] = 1
+    raw[(rsi > 65) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
 """,
 """
 def get_signals(df):
@@ -167,14 +73,19 @@ def get_signals(df):
     TP_PCT = 4.0
     close = df['close']
     volume = df['volume']
-    returns = close.pct_change()
-    vol = returns.rolling(20).std()
-    norm_returns = returns / vol
+    fast = close.ewm(span=12).mean()
+    slow = close.ewm(span=26).mean()
+    macd = fast - slow
+    signal = macd.ewm(span=9).mean()
+    hist = macd - signal
+    hist_z = (hist - hist.rolling(20).mean()) / hist.rolling(20).std()
     vol_avg = volume.rolling(20).mean()
-    signals = pd.Series(0, index=df.index)
-    signals[(norm_returns > 1.0) & (volume > vol_avg)] = 1
-    signals[(norm_returns < -1.0) & (volume > vol_avg)] = -1
-    return signals
+    ema100 = close.ewm(span=100).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(hist_z > 0.8) & (close > ema100) & (volume > vol_avg)] = 1
+    raw[(hist_z < -0.8) & (close < ema100) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
 """,
 """
 def get_signals(df):
@@ -183,14 +94,19 @@ def get_signals(df):
     SL_PCT = 1.5
     TP_PCT = 3.0
     close = df['close']
-    ema100 = close.ewm(span=100).mean()
-    mu = close.rolling(20).mean()
-    sigma = close.rolling(20).std()
-    zscore = (close - mu) / sigma
-    signals = pd.Series(0, index=df.index)
-    signals[(zscore < -1.0) & (close > ema100)] = 1
-    signals[(zscore > 1.0) & (close > ema100)] = -1
-    return signals
+    volume = df['volume']
+    sma20 = close.rolling(20).mean()
+    std20 = close.rolling(20).std()
+    lower = sma20 - 2 * std20
+    upper = sma20 + 2 * std20
+    bandwidth = (upper - lower) / sma20
+    vol_avg = volume.rolling(20).mean()
+    ema50 = close.ewm(span=50).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(close < lower) & (bandwidth > 0.015) & (close > ema50) & (volume > vol_avg)] = 1
+    raw[(close > upper) & (bandwidth > 0.015) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
 """,
 """
 def get_signals(df):
@@ -199,20 +115,43 @@ def get_signals(df):
     SL_PCT = 2.5
     TP_PCT = 5.0
     close = df['close']
+    volume = df['volume']
     high = df['high']
     low = df['low']
-    volume = df['volume']
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
-    atr = tr.rolling(10).mean()
-    mid = close.rolling(10).mean()
-    upper = mid + atr
-    lower = mid - atr
-    vol_avg = volume.rolling(10).mean()
+    atr = tr.rolling(14).mean()
+    mid = close.rolling(20).mean()
+    upper = mid + 1.5 * atr
+    lower = mid - 1.5 * atr
+    vol_avg = volume.rolling(20).mean()
     ema50 = close.ewm(span=50).mean()
-    signals = pd.Series(0, index=df.index)
-    signals[(close < lower) & (volume > vol_avg) & (close > ema50)] = 1
-    signals[(close > upper) & (volume > vol_avg)] = -1
-    return signals
+    raw = pd.Series(0, index=df.index)
+    raw[(close > upper) & (close > ema50) & (volume > vol_avg)] = 1
+    raw[(close < lower) & (close < ema50) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
+""",
+"""
+def get_signals(df):
+    import pandas as pd
+    import numpy as np
+    SL_PCT = 1.8
+    TP_PCT = 3.5
+    close = df['close']
+    volume = df['volume']
+    high = df['high']
+    low = df['low']
+    lowest = low.rolling(14).min()
+    highest = high.rolling(14).max()
+    stoch = 100 * (close - lowest) / (highest - lowest)
+    stoch_ma = stoch.rolling(3).mean()
+    vol_avg = volume.rolling(20).mean()
+    ema50 = close.ewm(span=50).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(stoch_ma < 20) & (close > ema50) & (volume > vol_avg)] = 1
+    raw[(stoch_ma > 80) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
 """,
 """
 def get_signals(df):
@@ -222,17 +161,124 @@ def get_signals(df):
     TP_PCT = 4.0
     close = df['close']
     volume = df['volume']
+    returns = close.pct_change()
+    mom = returns.rolling(10).mean()
+    mom_z = (mom - mom.rolling(20).mean()) / mom.rolling(20).std()
+    vol_avg = volume.rolling(20).mean()
+    ema50 = close.ewm(span=50).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(mom_z > 0.5) & (close > ema50) & (volume > vol_avg)] = 1
+    raw[(mom_z < -0.5) & (close < ema50) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
+""",
+"""
+def get_signals(df):
+    import pandas as pd
+    import numpy as np
+    SL_PCT = 1.5
+    TP_PCT = 3.0
+    close = df['close']
+    volume = df['volume']
+    ema10 = close.ewm(span=10).mean()
+    ema30 = close.ewm(span=30).mean()
+    ema100 = close.ewm(span=100).mean()
+    diff = ema10 - ema30
+    diff_z = (diff - diff.rolling(20).mean()) / diff.rolling(20).std()
+    vol_avg = volume.rolling(20).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(diff_z > 0.5) & (close > ema100) & (volume > vol_avg)] = 1
+    raw[(diff_z < -0.5) & (close < ema100) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
+""",
+"""
+def get_signals(df):
+    import pandas as pd
+    import numpy as np
+    SL_PCT = 2.0
+    TP_PCT = 4.0
+    close = df['close']
+    volume = df['volume']
+    high = df['high']
+    low = df['low']
+    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
+    atr = tr.rolling(10).mean()
+    mid = close.rolling(10).mean()
+    upper = mid + atr
+    lower = mid - atr
+    ema50 = close.ewm(span=50).mean()
+    vol_avg = volume.rolling(10).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(close > upper) & (close > ema50) & (volume > vol_avg)] = 1
+    raw[(close < lower) & (close < ema50) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
+""",
+"""
+def get_signals(df):
+    import pandas as pd
+    import numpy as np
+    SL_PCT = 1.8
+    TP_PCT = 3.5
+    close = df['close']
+    volume = df['volume']
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0).rolling(7).mean()
     loss = -delta.where(delta < 0, 0.0).rolling(7).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
-    vol_avg = volume.rolling(14).mean()
+    sma = close.rolling(10).mean()
+    std = close.rolling(10).std()
+    zscore = (close - sma) / std
+    vol_avg = volume.rolling(20).mean()
     ema50 = close.ewm(span=50).mean()
-    signals = pd.Series(0, index=df.index)
-    signals[(rsi < 35) & (volume > vol_avg * 1.2) & (close > ema50)] = 1
-    signals[(rsi > 65) & (volume > vol_avg * 1.2)] = -1
-    return signals
+    raw = pd.Series(0, index=df.index)
+    raw[(rsi < 40) & (zscore < -0.8) & (close > ema50) & (volume > vol_avg)] = 1
+    raw[(rsi > 60) & (zscore > 0.8) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
+""",
+"""
+def get_signals(df):
+    import pandas as pd
+    import numpy as np
+    SL_PCT = 2.5
+    TP_PCT = 5.0
+    close = df['close']
+    volume = df['volume']
+    returns = close.pct_change()
+    vol = returns.rolling(20).std()
+    norm_ret = returns / vol
+    norm_z = (norm_ret - norm_ret.rolling(20).mean()) / norm_ret.rolling(20).std()
+    ema50 = close.ewm(span=50).mean()
+    ema100 = close.ewm(span=100).mean()
+    vol_avg = volume.rolling(20).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(norm_z > 0.6) & (close > ema50) & (close > ema100) & (volume > vol_avg)] = 1
+    raw[(norm_z < -0.6) & (close < ema50) & (close < ema100) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
+""",
+"""
+def get_signals(df):
+    import pandas as pd
+    import numpy as np
+    SL_PCT = 1.5
+    TP_PCT = 3.0
+    close = df['close']
+    volume = df['volume']
+    high = df['high']
+    low = df['low']
+    ema20 = close.ewm(span=20).mean()
+    ema50 = close.ewm(span=50).mean()
+    ema100 = close.ewm(span=100).mean()
+    vol_avg = volume.rolling(20).mean()
+    raw = pd.Series(0, index=df.index)
+    raw[(ema20 > ema50) & (close > ema20) & (close > ema100) & (volume > vol_avg)] = 1
+    raw[(ema20 < ema50) & (close < ema20) & (close < ema100) & (volume > vol_avg)] = -1
+    signals = raw / close.rolling(20).std()
+    return signals.fillna(0)
 """
 ]
 
