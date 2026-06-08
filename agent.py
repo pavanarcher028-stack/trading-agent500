@@ -10,12 +10,7 @@ from data import get_top5_ohlcv, get_market_summary
 from backtest import run_backtest, is_strategy_good
 from trader import execute_strategy
 from monitor import needs_regeneration, bump_strategy_version, get_performance_summary
-from ai_improver import (
-    batch_improve_and_validate_strategies, generate_html_report,
-    call_gemini, call_nvidia_for_improvement,
-    generate_unique_strategy, build_generation_prompt,
-    improve_strategy_with_google_ai
-)
+# AI improver no longer used - fallback strategies only
 from data import get_market_summary
 
 print("TRADING AGENT STARTED", flush=True)
@@ -538,19 +533,6 @@ def try_fallback_strategies(coin, all_data):
     return None
 
 
-def generate_ai_strategy(coin, all_data, market_summary):
-    print("[AI] Generating strategy for " + coin + " with Gemini...", flush=True)
-    prompt = build_generation_prompt(market_summary, [coin])
-    code = generate_unique_strategy(call_gemini, prompt, coin, None, max_retries=3)
-    if code:
-        return code
-    print("[AI] Gemini failed for " + coin + " - trying NVIDIA...", flush=True)
-    nvidia_code = generate_unique_strategy(call_nvidia_for_improvement, prompt, coin, None, max_retries=3)
-    if nvidia_code:
-        return nvidia_code
-    return None
-
-
 def search_strategy(all_data, coins):
     global active_strategy, active_good_coins
     market_summary = get_market_summary(all_data)
@@ -645,7 +627,7 @@ def run_agent():
             time.sleep(3600)
         return
     print("[AGENT] All keys found", flush=True)
-    print("[AGENT] AI Providers: Google Gemini (Code Gen) + NVIDIA NIM (Validation)", flush=True)
+    print("[AGENT] Strategy source: 20 built-in fallback strategies (no AI)", flush=True)
     trading_thread_started = False
     loop_count = 0
     while True:
