@@ -10,7 +10,13 @@ from data import get_top5_ohlcv, get_market_summary
 from backtest import run_backtest, is_strategy_good, get_metric_statistics
 from trader import execute_strategy
 from monitor import needs_regeneration, bump_strategy_version, get_performance_summary
-from ai_improver import batch_improve_and_validate_strategies, generate_html_report
+from ai_improver import (
+    batch_improve_and_validate_strategies, generate_html_report,
+    call_gemini, call_nvidia_for_improvement,
+    generate_unique_strategy, build_generation_prompt,
+    improve_strategy_with_google_ai
+)
+from data import get_market_summary
 
 print("TRADING AGENT STARTED", flush=True)
 
@@ -20,303 +26,57 @@ lock = threading.Lock()
 trade_count = 0
 revalidate_every = random.randint(10, 20)
 
-STRATEGIES = [
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 1.8
-    TP_PCT = 3.5
-    close = df['close']
-    volume = df['volume']
-    sma = close.rolling(10).mean()
-    std = close.rolling(10).std()
-    zscore = (close - sma) / std
-    vol_avg = volume.rolling(20).mean()
-    ema50 = close.ewm(span=50).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[zscore < -1.2] = 1
-    raw[zscore > 1.2] = -1
-    trend_ok = close > ema50
-    vol_ok = volume > vol_avg
-    signals = raw * 1
-    signals[~(trend_ok & vol_ok)] = 0
-    signals = signals / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    volume = df['volume']
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0.0).rolling(14).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    vol_avg = volume.rolling(20).mean()
-    ema50 = close.ewm(span=50).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(rsi < 35) & (close > ema50) & (volume > vol_avg)] = 1
-    raw[(rsi > 65) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    volume = df['volume']
-    fast = close.ewm(span=12).mean()
-    slow = close.ewm(span=26).mean()
-    macd = fast - slow
-    signal = macd.ewm(span=9).mean()
-    hist = macd - signal
-    hist_z = (hist - hist.rolling(20).mean()) / hist.rolling(20).std()
-    vol_avg = volume.rolling(20).mean()
-    ema100 = close.ewm(span=100).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(hist_z > 0.8) & (close > ema100) & (volume > vol_avg)] = 1
-    raw[(hist_z < -0.8) & (close < ema100) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 1.5
-    TP_PCT = 3.0
-    close = df['close']
-    volume = df['volume']
-    sma20 = close.rolling(20).mean()
-    std20 = close.rolling(20).std()
-    lower = sma20 - 2 * std20
-    upper = sma20 + 2 * std20
-    bandwidth = (upper - lower) / sma20
-    vol_avg = volume.rolling(20).mean()
-    ema50 = close.ewm(span=50).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(close < lower) & (bandwidth > 0.015) & (close > ema50) & (volume > vol_avg)] = 1
-    raw[(close > upper) & (bandwidth > 0.015) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.5
-    TP_PCT = 5.0
-    close = df['close']
-    volume = df['volume']
-    high = df['high']
-    low = df['low']
-    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
-    mid = close.rolling(20).mean()
-    upper = mid + 1.5 * atr
-    lower = mid - 1.5 * atr
-    vol_avg = volume.rolling(20).mean()
-    ema50 = close.ewm(span=50).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(close > upper) & (close > ema50) & (volume > vol_avg)] = 1
-    raw[(close < lower) & (close < ema50) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 1.8
-    TP_PCT = 3.5
-    close = df['close']
-    volume = df['volume']
-    high = df['high']
-    low = df['low']
-    lowest = low.rolling(14).min()
-    highest = high.rolling(14).max()
-    stoch = 100 * (close - lowest) / (highest - lowest)
-    stoch_ma = stoch.rolling(3).mean()
-    vol_avg = volume.rolling(20).mean()
-    ema50 = close.ewm(span=50).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(stoch_ma < 20) & (close > ema50) & (volume > vol_avg)] = 1
-    raw[(stoch_ma > 80) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    volume = df['volume']
-    returns = close.pct_change()
-    mom = returns.rolling(10).mean()
-    mom_z = (mom - mom.rolling(20).mean()) / mom.rolling(20).std()
-    vol_avg = volume.rolling(20).mean()
-    ema50 = close.ewm(span=50).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(mom_z > 0.5) & (close > ema50) & (volume > vol_avg)] = 1
-    raw[(mom_z < -0.5) & (close < ema50) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 1.5
-    TP_PCT = 3.0
-    close = df['close']
-    volume = df['volume']
-    ema10 = close.ewm(span=10).mean()
-    ema30 = close.ewm(span=30).mean()
-    ema100 = close.ewm(span=100).mean()
-    diff = ema10 - ema30
-    diff_z = (diff - diff.rolling(20).mean()) / diff.rolling(20).std()
-    vol_avg = volume.rolling(20).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(diff_z > 0.5) & (close > ema100) & (volume > vol_avg)] = 1
-    raw[(diff_z < -0.5) & (close < ema100) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.0
-    TP_PCT = 4.0
-    close = df['close']
-    volume = df['volume']
-    high = df['high']
-    low = df['low']
-    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
-    atr = tr.rolling(10).mean()
-    mid = close.rolling(10).mean()
-    upper = mid + atr
-    lower = mid - atr
-    ema50 = close.ewm(span=50).mean()
-    vol_avg = volume.rolling(10).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(close > upper) & (close > ema50) & (volume > vol_avg)] = 1
-    raw[(close < lower) & (close < ema50) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 1.8
-    TP_PCT = 3.5
-    close = df['close']
-    volume = df['volume']
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0).rolling(7).mean()
-    loss = -delta.where(delta < 0, 0.0).rolling(7).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    sma = close.rolling(10).mean()
-    std = close.rolling(10).std()
-    zscore = (close - sma) / std
-    vol_avg = volume.rolling(20).mean()
-    ema50 = close.ewm(span=50).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(rsi < 40) & (zscore < -0.8) & (close > ema50) & (volume > vol_avg)] = 1
-    raw[(rsi > 60) & (zscore > 0.8) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 2.5
-    TP_PCT = 5.0
-    close = df['close']
-    volume = df['volume']
-    returns = close.pct_change()
-    vol = returns.rolling(20).std()
-    norm_ret = returns / vol
-    norm_z = (norm_ret - norm_ret.rolling(20).mean()) / norm_ret.rolling(20).std()
-    ema50 = close.ewm(span=50).mean()
-    ema100 = close.ewm(span=100).mean()
-    vol_avg = volume.rolling(20).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(norm_z > 0.6) & (close > ema50) & (close > ema100) & (volume > vol_avg)] = 1
-    raw[(norm_z < -0.6) & (close < ema50) & (close < ema100) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-""",
-"""
-def get_signals(df):
-    import pandas as pd
-    import numpy as np
-    SL_PCT = 1.5
-    TP_PCT = 3.0
-    close = df['close']
-    volume = df['volume']
-    high = df['high']
-    low = df['low']
-    ema20 = close.ewm(span=20).mean()
-    ema50 = close.ewm(span=50).mean()
-    ema100 = close.ewm(span=100).mean()
-    vol_avg = volume.rolling(20).mean()
-    raw = pd.Series(0, index=df.index)
-    raw[(ema20 > ema50) & (close > ema20) & (close > ema100) & (volume > vol_avg)] = 1
-    raw[(ema20 < ema50) & (close < ema20) & (close < ema100) & (volume > vol_avg)] = -1
-    signals = raw / close.rolling(20).std()
-    return signals.fillna(0)
-"""
-]
+def generate_ai_strategy(coin, all_data, market_summary):
+    print("[AI] Generating strategy for " + coin + " with Gemini...", flush=True)
+    prompt = build_generation_prompt(market_summary, [coin])
+    code = generate_unique_strategy(call_gemini, prompt, coin, None, max_retries=3)
+    if code:
+        return code
+    print("[AI] Gemini failed for " + coin + " - trying NVIDIA...", flush=True)
+    nvidia_code = generate_unique_strategy(call_nvidia_for_improvement, prompt, coin, None, max_retries=3)
+    if nvidia_code:
+        return nvidia_code
+    return None
 
 
 def search_strategy(all_data, coins):
     global active_strategy, active_good_coins
-    print("[SEARCH] Testing " + str(len(STRATEGIES)) + " strategies for: " + str(coins), flush=True)
-    for idx, strat in enumerate(STRATEGIES):
+    market_summary = get_market_summary(all_data)
+    print("[SEARCH] Generating AI strategies for: " + str(coins), flush=True)
+    for coin in coins:
         try:
-            subset_data = {c: all_data[c] for c in coins if c in all_data}
-            results = run_backtest(strat, subset_data)
+            if coin in active_good_coins:
+                continue
+            print("[SEARCH] Generating strategy for " + coin + "...", flush=True)
+            code = generate_ai_strategy(coin, all_data, market_summary)
+            if not code:
+                print("[SEARCH] AI failed to generate for " + coin + " - skipping", flush=True)
+                continue
+            subset = {coin: all_data[coin]} if coin in all_data else {}
+            if not subset:
+                continue
+            results = run_backtest(code, subset)
             good_coins, partial_fails = is_strategy_good(results)
-            if good_coins:
-                for coin in good_coins:
+            if coin in good_coins:
+                with lock:
+                    active_good_coins.append(coin)
+                    active_strategy = code
+                    save_strategy(code, active_good_coins)
+                print("[SEARCH] AI strategy approved for " + coin, flush=True)
+            elif partial_fails:
+                print("[SEARCH] " + coin + " partially passed - improving with AI...", flush=True)
+                improved = batch_improve_and_validate_strategies(partial_fails, code, all_data)
+                if improved and coin in improved:
                     with lock:
                         if coin not in active_good_coins:
                             active_good_coins.append(coin)
-                            active_strategy = strat
-                            save_strategy(strat, active_good_coins)
-                            print("[SEARCH] Strategy " + str(idx + 1) + " approved " + coin, flush=True)
-                coins = [c for c in coins if c not in active_good_coins]
-                if not coins:
-                    print("[SEARCH] All coins approved", flush=True)
-                    break
-            if partial_fails:
-                improved = batch_improve_and_validate_strategies(partial_fails, strat, all_data)
-                if improved:
-                    for coin, new_code in improved.items():
-                        with lock:
-                            if coin not in active_good_coins:
-                                active_good_coins.append(coin)
-                                active_strategy = new_code
-                                save_strategy(new_code, active_good_coins)
-                                print("[SEARCH] AI improved strategy approved " + coin, flush=True)
-                        coins = [c for c in coins if c not in active_good_coins]
+                            active_strategy = improved[coin]
+                            save_strategy(improved[coin], active_good_coins)
+                    print("[SEARCH] AI improved strategy approved for " + coin, flush=True)
+            else:
+                print("[SEARCH] AI strategy failed all metrics for " + coin, flush=True)
         except Exception as e:
-            print("[SEARCH] Strategy " + str(idx + 1) + " error: " + str(e), flush=True)
-        time.sleep(2)
+            print("[SEARCH] Error for " + coin + ": " + str(e), flush=True)
     remaining = [c for c in coins if c not in active_good_coins]
     if remaining:
         print("[SEARCH] No passing strategy for: " + str(remaining), flush=True)
