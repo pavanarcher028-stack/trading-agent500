@@ -84,6 +84,7 @@ def get_balance():
                     _balance_cache["value"] = inr
                     _balance_cache["time"] = now
                 return inr
+        print("[TRADER] No INR balance found in API response: " + json.dumps(balances)[:300], flush=True)
         with _balance_cache_lock:
             _balance_cache["value"] = 0
             _balance_cache["time"] = now
