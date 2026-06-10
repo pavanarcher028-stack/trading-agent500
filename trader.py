@@ -35,12 +35,13 @@ MAX_TRADE = 500
 FUTURES_LEVERAGE = 3
 INTERVALS = ["5m", "15m", "30m", "1h"]
 
-POSITIONS_FILE = "positions.json"
-positions_lock = threading.Lock()
 _balance_cache = {"value": None, "time": 0}
 _balance_cache_lock = threading.Lock()
 _futures_instruments_cache = None
 _futures_instruments_time = 0
+
+def _positions_file(interval):
+    return "positions_" + interval + ".json"
 
 def sign_request(body_dict):
     if not API_KEY or not API_SECRET:
@@ -58,14 +59,15 @@ def sign_request(body_dict):
     }
     return json_body, headers
 
-def load_positions():
-    if os.path.exists(POSITIONS_FILE):
-        with open(POSITIONS_FILE, "r") as f:
+def load_positions(interval="1h"):
+    fname = _positions_file(interval)
+    if os.path.exists(fname):
+        with open(fname, "r") as f:
             return json.load(f)
     return {}
 
-def save_positions(positions):
-    with open(POSITIONS_FILE, "w") as f:
+def save_positions(positions, interval="1h"):
+    with open(_positions_file(interval), "w") as f:
         json.dump(positions, f, indent=2)
 
 def get_balance():
@@ -218,8 +220,8 @@ def _pick_price(all_data, coin):
             return float(all_data[coin][tf]["close"].iloc[-1])
     return 0
 
-def check_and_close_positions(all_data):
-    positions = load_positions()
+def check_and_close_positions(all_data, interval="1h"):
+    positions = load_positions(interval)
     if not positions:
         return
     to_remove = []
@@ -237,7 +239,7 @@ def check_and_close_positions(all_data):
             else:
                 pct_change = (current_price - entry) / entry * 100.0
             if pct_change <= -sl_pct:
-                print("[TRADER] SL HIT " + coin + " (" + side + " " + str(round(pct_change, 2)) + "%)", flush=True)
+                print("[TRADER SL] HIT " + coin + " on " + interval + " (" + side + " " + str(round(pct_change, 2)) + "%)", flush=True)
                 if TRADE_MODE == "futures":
                     close_side = "buy" if side == "short" else "sell"
                     place_futures_order(close_side, FUTURES_PAIR_MAP[coin], pos["quantity"])
@@ -247,9 +249,9 @@ def check_and_close_positions(all_data):
                         place_order("sell", coin_symbol, pos["quantity"])
                 to_remove.append(coin)
                 from monitor import record_trade
-                record_trade(coin, "sell", entry, current_price, pos["quantity"])
+                record_trade(coin, "sell_" + interval + "_sl", entry, current_price, pos["quantity"])
             elif pct_change >= tp_pct:
-                print("[TRADER] TP HIT " + coin + " (" + side + " " + str(round(pct_change, 2)) + "%)", flush=True)
+                print("[TRADER TP] HIT " + coin + " on " + interval + " (" + side + " " + str(round(pct_change, 2)) + "%)", flush=True)
                 if TRADE_MODE == "futures":
                     close_side = "buy" if side == "short" else "sell"
                     place_futures_order(close_side, FUTURES_PAIR_MAP[coin], pos["quantity"])
@@ -259,25 +261,17 @@ def check_and_close_positions(all_data):
                         place_order("sell", coin_symbol, pos["quantity"])
                 to_remove.append(coin)
                 from monitor import record_trade
-                record_trade(coin, "sell", entry, current_price, pos["quantity"])
+                record_trade(coin, "sell_" + interval + "_tp", entry, current_price, pos["quantity"])
         except Exception as e:
-            print("[TRADER] Position check error " + coin + ": " + str(e), flush=True)
+            print("[TRADER] Position check error " + coin + " on " + interval + ": " + str(e), flush=True)
     if to_remove:
-        with positions_lock:
-            positions = load_positions()
-            for c in to_remove:
-                positions.pop(c, None)
-            save_positions(positions)
+        positions = load_positions(interval)
+        for c in to_remove:
+            positions.pop(c, None)
+        save_positions(positions, interval)
 
-def execute_strategy(strategy_code, all_data, good_coins):
-    check_and_close_positions(all_data)
-    if not good_coins:
-        print("[TRADER] No approved coins to trade", flush=True)
-        return {}
-    local_env = {}
-    exec(strategy_code, local_env)
-    get_signals = local_env["get_signals"]
-    sl_pct, tp_pct = parse_sl_tp(strategy_code)
+def execute_strategy(strategy_code, all_data, good_coins, interval="1h"):
+    check_and_close_positions(all_data, interval)
 
     if TRADE_MODE == "futures":
         usdt = get_futures_balance()
@@ -289,11 +283,10 @@ def execute_strategy(strategy_code, all_data, good_coins):
             trade_amount = 50
         if trade_amount < 5:
             trade_amount = 5
-        print("[TRADER] Futures trade amount: " + str(round(trade_amount, 2)) + " USDT", flush=True)
     else:
         inr_balance = get_balance()
         if inr_balance < MIN_TRADE:
-            print("[TRADER] Balance too low - need at least Rs." + str(MIN_TRADE), flush=True)
+            print("[TRADER] Balance too low on " + interval + " - need at least Rs." + str(MIN_TRADE), flush=True)
             return {}
         trade_amount = inr_balance * TRADE_PERCENT
         if trade_amount < MIN_TRADE:
@@ -301,110 +294,92 @@ def execute_strategy(strategy_code, all_data, good_coins):
         if trade_amount > MAX_TRADE:
             trade_amount = MAX_TRADE
 
+    if not interval or interval not in all_data.get(list(all_data.keys())[0], {}):
+        print("[TRADER] Interval " + str(interval) + " not in data for " + interval, flush=True)
+        return {}
+
+    local_env = {}
+    exec(strategy_code, local_env)
+    get_signals = local_env["get_signals"]
+    sl_pct, tp_pct = parse_sl_tp(strategy_code)
+
     results = {}
+    positions = load_positions(interval)
+
     for coin in good_coins:
         try:
             coin_data = all_data.get(coin, {})
-            if not coin_data:
+            if interval not in coin_data:
                 continue
-            available_tfs = [tf for tf in INTERVALS if tf in coin_data]
-            if not available_tfs:
-                continue
-            best_signal = 0
-            signal_detail = []
-            for tf in available_tfs:
-                df = coin_data[tf]
-                sig = int(get_signals(df.copy()).iloc[-1])
-                price = float(df["close"].iloc[-1])
-                signal_detail.append(tf + "=" + str(sig) + "@" + str(round(price, 2)))
-                if sig != 0:
-                    best_signal = sig
-            current_price = _pick_price(all_data, coin)
-            positions = load_positions()
+            df = coin_data[interval]
+            sig = int(get_signals(df.copy()).iloc[-1])
+            current_price = float(df["close"].iloc[-1])
             pair = FUTURES_PAIR_MAP[coin] if TRADE_MODE == "futures" else COIN_MAP[coin]
-            print("[TRADER] " + coin + " sigs=[" + ", ".join(signal_detail) + "] pos=" + str(coin in positions), flush=True)
+            in_pos = coin in positions
+
+            print("[TRADER] " + interval + " " + coin + " sig=" + str(sig) + " pos=" + str(in_pos), flush=True)
 
             if TRADE_MODE == "futures":
-                if best_signal == 1:
-                    if coin in positions and positions[coin].get("side") == "short":
-                        print("[TRADER] CLOSE SHORT " + coin + " (signal=1)", flush=True)
+                if sig == 1:
+                    if in_pos and positions[coin].get("side") == "short":
                         order = place_futures_order("buy", pair, positions[coin]["quantity"])
                         if order and order.get("code") != "error":
                             from monitor import record_trade
-                            record_trade(coin, "buy", positions[coin]["entry_price"], current_price, positions[coin]["quantity"])
-                            with positions_lock:
-                                p = load_positions(); p.pop(coin, None); save_positions(p)
-                            print("[TRADER] Short closed for " + coin, flush=True)
+                            record_trade(coin, "buy_" + interval, positions[coin]["entry_price"], current_price, positions[coin]["quantity"])
+                            p = load_positions(interval); p.pop(coin, None); save_positions(p, interval)
                         results[coin] = {"action": "close_short", "order": order}
-                    elif coin in positions and positions[coin].get("side") == "long":
-                        print("[TRADER] Already long " + coin + " - holding", flush=True)
+                    elif in_pos and positions[coin].get("side") == "long":
                         results[coin] = {"action": "hold"}
                     else:
                         quantity = round(trade_amount / current_price, 6)
-                        print("[TRADER] LONG " + coin + " qty=" + str(quantity) + " at " + str(round(current_price, 2)), flush=True)
                         order = place_futures_order("buy", pair, quantity)
                         if order and order.get("code") != "error":
-                            with positions_lock:
-                                p = load_positions()
-                                p[coin] = {"entry_price": current_price, "quantity": quantity, "sl_pct": sl_pct, "tp_pct": tp_pct, "entry_time": time.time(), "side": "long"}
-                                save_positions(p)
-                            print("[TRADER] LONG opened for " + coin, flush=True)
+                            p = load_positions(interval)
+                            p[coin] = {"entry_price": current_price, "quantity": quantity, "sl_pct": sl_pct, "tp_pct": tp_pct, "entry_time": time.time(), "side": "long"}
+                            save_positions(p, interval)
                         results[coin] = {"action": "long", "order": order, "price": current_price, "quantity": quantity}
-                elif best_signal == -1:
-                    if coin in positions and positions[coin].get("side") == "long":
-                        print("[TRADER] CLOSE LONG " + coin + " (signal=-1)", flush=True)
+                elif sig == -1:
+                    if in_pos and positions[coin].get("side") == "long":
                         order = place_futures_order("sell", pair, positions[coin]["quantity"])
                         if order and order.get("code") != "error":
                             from monitor import record_trade
-                            record_trade(coin, "sell", positions[coin]["entry_price"], current_price, positions[coin]["quantity"])
-                            with positions_lock:
-                                p = load_positions(); p.pop(coin, None); save_positions(p)
-                            print("[TRADER] Long closed for " + coin, flush=True)
+                            record_trade(coin, "sell_" + interval, positions[coin]["entry_price"], current_price, positions[coin]["quantity"])
+                            p = load_positions(interval); p.pop(coin, None); save_positions(p, interval)
                         results[coin] = {"action": "close_long", "order": order}
-                    elif coin in positions and positions[coin].get("side") == "short":
-                        print("[TRADER] Already short " + coin + " - holding", flush=True)
+                    elif in_pos and positions[coin].get("side") == "short":
                         results[coin] = {"action": "hold"}
                     else:
                         quantity = round(trade_amount / current_price, 6)
-                        print("[TRADER] SHORT " + coin + " qty=" + str(quantity) + " at " + str(round(current_price, 2)), flush=True)
                         order = place_futures_order("sell", pair, quantity)
                         if order and order.get("code") != "error":
-                            with positions_lock:
-                                p = load_positions()
-                                p[coin] = {"entry_price": current_price, "quantity": quantity, "sl_pct": sl_pct, "tp_pct": tp_pct, "entry_time": time.time(), "side": "short"}
-                                save_positions(p)
-                            print("[TRADER] SHORT opened for " + coin, flush=True)
+                            p = load_positions(interval)
+                            p[coin] = {"entry_price": current_price, "quantity": quantity, "sl_pct": sl_pct, "tp_pct": tp_pct, "entry_time": time.time(), "side": "short"}
+                            save_positions(p, interval)
                         results[coin] = {"action": "short", "order": order, "price": current_price, "quantity": quantity}
                 else:
                     results[coin] = {"action": "hold", "order": None}
             else:
-                if best_signal == 1 and coin not in positions:
+                if sig == 1 and not in_pos:
                     quantity = round(trade_amount / current_price, 6)
-                    print("[TRADER] BUY " + coin + " qty=" + str(quantity) + " at Rs." + str(round(current_price, 2)), flush=True)
                     order = place_order("buy", pair, quantity)
                     if order and "id" in order:
-                        with positions_lock:
-                            p = load_positions()
-                            p[coin] = {"entry_price": current_price, "quantity": quantity, "sl_pct": sl_pct, "tp_pct": tp_pct, "entry_time": time.time(), "side": "long"}
-                            save_positions(p)
-                        print("[TRADER] Position opened for " + coin, flush=True)
+                        p = load_positions(interval)
+                        p[coin] = {"entry_price": current_price, "quantity": quantity, "sl_pct": sl_pct, "tp_pct": tp_pct, "entry_time": time.time(), "side": "long"}
+                        save_positions(p, interval)
                     results[coin] = {"action": "buy", "order": order, "price": current_price, "quantity": quantity}
-                elif best_signal == -1 and coin in positions:
-                    print("[TRADER] SELL " + coin + " (signal=-1)", flush=True)
+                elif sig == -1 and in_pos:
                     order = place_order("sell", pair, positions[coin]["quantity"])
                     if order and "id" in order:
                         from monitor import record_trade
-                        record_trade(coin, "sell", positions[coin]["entry_price"], current_price, positions[coin]["quantity"])
-                        with positions_lock:
-                            p = load_positions(); p.pop(coin, None); save_positions(p)
-                        print("[TRADER] Position closed for " + coin, flush=True)
+                        record_trade(coin, "sell_" + interval, positions[coin]["entry_price"], current_price, positions[coin]["quantity"])
+                        p = load_positions(interval); p.pop(coin, None); save_positions(p, interval)
                     results[coin] = {"action": "sell", "order": order}
-                elif best_signal == -1 and coin not in positions:
-                    print("[TRADER] SHORT signal for " + coin + " - set TRADE_MODE=futures to short", flush=True)
+                elif sig == -1 and not in_pos:
+                    print("[TRADER] " + interval + " SHORT signal for " + coin + " - set TRADE_MODE=futures to short", flush=True)
                     results[coin] = {"action": "short_signal_no_pos"}
                 else:
                     results[coin] = {"action": "hold", "order": None}
-            time.sleep(1)
+            time.sleep(0.5)
         except Exception as e:
-            print("[TRADER] Error for " + coin + ": " + str(e), flush=True)
+            print("[TRADER] Error for " + coin + " on " + interval + ": " + str(e), flush=True)
     return results

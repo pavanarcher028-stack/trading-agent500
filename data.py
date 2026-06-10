@@ -40,6 +40,22 @@ def get_ohlcv(pair, interval):
 
 _data_cache = {}
 
+def get_interval_data(interval):
+    global _data_cache
+    result = {}
+    for symbol, pair in COINS.items():
+        cache_key = symbol + "_" + interval
+        if cache_key in _data_cache:
+            result[symbol] = {interval: _data_cache[cache_key]}
+            continue
+        df = get_ohlcv(pair, interval)
+        if df is not None:
+            _data_cache[cache_key] = df
+            result[symbol] = {interval: df}
+        time.sleep(0.5)
+    print("[DATA] Interval " + interval + " done — " + str(len(result)) + "/5 coins", flush=True)
+    return result
+
 def get_top5_multi_tf():
     global _data_cache
     all_data = {}

@@ -6,12 +6,10 @@ import random
 import log_capture; log_capture.install()
 from api import start_api
 from strategy_store import save_strategy, load_strategy
-from data import get_top5_ohlcv, get_top5_multi_tf, get_market_summary
+from data import get_top5_ohlcv, get_interval_data, get_market_summary
 from backtest import run_backtest, is_strategy_good
 from trader import execute_strategy
 from monitor import bump_strategy_version, get_performance_summary
-# AI improver no longer used - fallback strategies only
-from data import get_market_summary
 
 print("TRADING AGENT STARTED", flush=True)
 
@@ -594,7 +592,7 @@ def revalidate(all_data):
     print("[REVALIDATE] Next check in " + str(revalidate_every) + " trades", flush=True)
 
 
-def trading_loop(_=None):
+def trading_loop(interval, sleep_sec):
     global trade_count
     while True:
         try:
@@ -602,27 +600,28 @@ def trading_loop(_=None):
                 strat = active_strategy
                 coins = list(active_good_coins)
             if strat and coins:
-                all_data = get_top5_multi_tf()
+                all_data = get_interval_data(interval)
                 if not all_data:
-                    print("[TRADER] No data, retrying in 5 mins", flush=True)
-                    time.sleep(300)
+                    print("[TRADER " + interval + "] No data, retrying in " + str(int(sleep_sec / 2)) + "s", flush=True)
+                    time.sleep(int(sleep_sec / 2))
                     continue
-                print("[TRADER] Checking: " + str(coins), flush=True)
-                result = execute_strategy(strat, all_data, coins)
-                trades_placed = sum(1 for v in result.values() if v.get("action") == "buy")
+                print("[TRADER " + interval + "] Checking: " + str(coins), flush=True)
+                result = execute_strategy(strat, all_data, coins, interval)
+                trades_placed = sum(1 for v in result.values() if v.get("action") in ("buy", "long", "short"))
                 if trades_placed > 0:
                     trade_count += 1
                 get_performance_summary()
-                print("[TRADER] Trade " + str(trade_count) + " done. Revalidate at " + str(revalidate_every), flush=True)
+                print("[TRADER " + interval + "] Trades this cycle: " + str(trades_placed) + ". Revalidate at " + str(revalidate_every), flush=True)
                 if trade_count >= revalidate_every and trade_count > 0:
-                    revalidate(all_data)
-                time.sleep(600)
+                    fresh_data = get_top5_ohlcv()
+                    revalidate(fresh_data)
+                time.sleep(sleep_sec)
             else:
-                print("[TRADER] Waiting for approved coins...", flush=True)
-                time.sleep(300)
+                print("[TRADER " + interval + "] Waiting for approved coins...", flush=True)
+                time.sleep(int(sleep_sec / 2))
         except Exception as e:
-            print("[TRADER] Error: " + str(e), flush=True)
-            time.sleep(300)
+            print("[TRADER " + interval + "] Error: " + str(e), flush=True)
+            time.sleep(int(sleep_sec / 2))
 
 
 def run_agent():
@@ -669,24 +668,27 @@ def run_agent():
         )
         search_thread.start()
 
-    threading.Thread(
-        target=trading_loop,
-        daemon=True
-    ).start()
+    for interval, sleep_sec in [("5m", 300), ("15m", 900), ("30m", 1800), ("1h", 3600)]:
+        threading.Thread(
+            target=trading_loop,
+            args=(interval, sleep_sec),
+            daemon=True
+        ).start()
+        print("[AGENT] Started " + interval + " trading thread (every " + str(int(sleep_sec / 60)) + " min)", flush=True)
 
     if search_thread:
         print("[AGENT] Waiting for strategy search to complete...", flush=True)
         search_thread.join()
-        print("[AGENT] Strategy search complete. Entering maintenance sleep.", flush=True)
+        print("[AGENT] Strategy search complete.", flush=True)
 
     while True:
         try:
-            time.sleep(600)
+            time.sleep(60)
         except KeyboardInterrupt:
             break
         except Exception as e:
             print("[AGENT] Maintenance error: " + str(e), flush=True)
-            time.sleep(600)
+            time.sleep(60)
 
 
 if __name__ == "__main__":
