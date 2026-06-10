@@ -1,8 +1,3 @@
-ccxt
 pandas
 numpy
-vectorbt
-anthropic
 requests
-openai
-google-generativeai
